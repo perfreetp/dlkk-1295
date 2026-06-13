@@ -141,6 +141,30 @@ export interface InspectionHistory {
   summary: string;
   operatorId: string;
   operatorName: string;
+  anomalyIds: string[];
+  hitRuleIds: string[];
+  shopId?: string;
+}
+
+export interface ReportSubscription {
+  daily: {
+    enabled: boolean;
+    methods: string[];
+    userIds: string[];
+    lastSentAt: Date | null;
+  };
+  weekly: {
+    enabled: boolean;
+    methods: string[];
+    userIds: string[];
+    lastSentAt: Date | null;
+  };
+  monthly: {
+    enabled: boolean;
+    methods: string[];
+    userIds: string[];
+    lastSentAt: Date | null;
+  };
 }
 
 export const RULE_TYPE_LABELS: Record<RuleType, string> = {

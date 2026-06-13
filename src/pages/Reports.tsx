@@ -9,44 +9,34 @@ import {
   Copy,
   Bell,
   Settings,
-  X
+  X,
+  Target
 } from 'lucide-react';
 import { useAnomalyStore } from '../store/anomalyStore';
 import { useAppStore } from '../store/appStore';
+import { useRuleStore } from '../store/ruleStore';
 import { RULE_TYPE_OPTIONS } from '../store/ruleStore';
+import { ReportSubscription } from '../types';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 
-interface Subscription {
-  enabled: boolean;
-  methods: string[];
-  userIds: string[];
-}
+type ReportType = 'daily' | 'weekly' | 'monthly';
 
 export default function Reports() {
   const { anomalies } = useAnomalyStore();
-  const { shops, users, currentUser } = useAppStore();
-  const [reportType, setReportType] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const { shops, users, currentUser, subscription: savedSubscription, updateSubscription, getSubscription } = useAppStore();
+  const { rules } = useRuleStore();
+  const [reportType, setReportType] = useState<ReportType>('daily');
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedShopId, setSelectedShopId] = useState('');
   const [generatedReport, setGeneratedReport] = useState<string | null>(null);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
-  const [subscription, setSubscription] = useState<Subscription>({
-    enabled: false,
-    methods: ['站内信'],
-    userIds: [],
-  });
+
+  const [subscription, setSubscription] = useState<ReportSubscription>(getSubscription);
 
   useEffect(() => {
-    const savedSubscription = localStorage.getItem('subscription');
-    if (savedSubscription) {
-      setSubscription(JSON.parse(savedSubscription));
-    }
-  }, []);
-
-  const saveSubscription = () => {
-    localStorage.setItem('subscription', JSON.stringify(subscription));
-    setShowSubscriptionModal(false);
-  };
+    setSubscription(getSubscription());
+  }, [savedSubscription]);
 
   const getDateRange = () => {
     const date = new Date(selectedDate);
@@ -64,17 +54,22 @@ export default function Reports() {
   
   const periodAnomalies = anomalies.filter((a) => {
     const anomalyDate = new Date(a.createdAt);
-    return anomalyDate >= dateRange.start && anomalyDate <= dateRange.end;
+    const inDateRange = anomalyDate >= dateRange.start && anomalyDate <= dateRange.end;
+    const matchShop = !selectedShopId || a.shopId === selectedShopId;
+    return inDateRange && matchShop;
   });
 
   const periodPending = periodAnomalies.filter((a) => a.status === 'pending');
   const periodProcessing = periodAnomalies.filter((a) => a.status === 'processing');
   const periodResolved = periodAnomalies.filter((a) => a.status === 'resolved');
+  const periodIgnored = periodAnomalies.filter((a) => a.status === 'ignored');
 
   const periodTypeStats = RULE_TYPE_OPTIONS.map((type) => ({
     type: type.label,
     count: periodAnomalies.filter((a) => a.type === type.value).length,
   }));
+
+  const shop = selectedShopId ? shops.find((s) => s.id === selectedShopId) : null;
 
   const generateReport = () => {
     let dateStr = '';
@@ -91,12 +86,13 @@ export default function Reports() {
     }
 
     const periodLabel = reportType === 'daily' ? '日' : reportType === 'weekly' ? '周' : '月';
+    const shopInfo = shop ? `\n巡检店铺: ${shop.name}` : '\n巡检店铺: 全部店铺';
     
     const reportContent = `
 === 数据巡检${periodLabel}报 ===
 
 报告周期: ${dateStr}
-生成时间: ${format(new Date(), 'yyyy-MM-dd HH:mm:ss', { locale: zhCN })}
+生成时间: ${format(new Date(), 'yyyy-MM-dd HH:mm:ss', { locale: zhCN })}${shopInfo}
 
 一、巡检概况
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -104,6 +100,7 @@ export default function Reports() {
 - 待处理: ${periodPending.length} 个
 - 处理中: ${periodProcessing.length} 个
 - 已解决: ${periodResolved.length} 个
+- 已忽略: ${periodIgnored.length} 个
 ${periodAnomalies.length > 0 ? `- 异常解决率: ${Math.round((periodResolved.length / periodAnomalies.length) * 100)}%` : ''}
 
 二、异常类型分布
@@ -116,7 +113,11 @@ ${periodAnomalies.filter((a) => a.level === 'critical').length > 0
   ? periodAnomalies
       .filter((a) => a.level === 'critical')
       .slice(0, 5)
-      .map((a, i) => `${i + 1}. [${a.level === 'critical' ? '严重' : a.level === 'warning' ? '警告' : '提示'}] ${a.title}\n   ${a.description}\n   店铺: ${shops.find((s) => s.id === a.shopId)?.name || '未知'}\n   状态: ${a.status === 'pending' ? '待处理' : a.status === 'processing' ? '处理中' : a.status === 'resolved' ? '已解决' : '已忽略'}`)
+      .map((a, i) => {
+        const handler = a.assigneeName || '未指派';
+        const handlerInfo = a.resolution ? `\n   处理人: ${handler}\n   处理说明: ${a.resolution}` : `\n   处理人: ${handler}`;
+        return `${i + 1}. [${a.level === 'critical' ? '严重' : a.level === 'warning' ? '警告' : '提示'}] ${a.title}\n   ${a.description}\n   店铺: ${shops.find((s) => s.id === a.shopId)?.name || '未知'}\n   状态: ${a.status === 'pending' ? '待处理' : a.status === 'processing' ? '处理中' : a.status === 'resolved' ? '已解决' : '已忽略'}${handlerInfo}`;
+      })
       .join('\n\n')
   : '本周期无严重级别异常'}
 
@@ -129,7 +130,7 @@ ${periodPending.length > 0
 五、附录
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - 监控店铺数: ${shops.filter((s) => s.status === 'active').length}
-- 活跃规则数: ${periodAnomalies.length > 0 ? anomalies.length : 0}
+- 活跃规则数: ${rules.filter(r => r.enabled).length}
 - 报告生成人: ${currentUser?.name || '系统'}
 
 ===========================================
@@ -151,9 +152,15 @@ ${periodPending.length > 0
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
       const periodLabel = reportType === 'daily' ? '日报' : reportType === 'weekly' ? '周报' : '月报';
-      link.download = `数据巡检${periodLabel}_${format(selectedDate, 'yyyyMMdd')}.txt`;
+      const shopSuffix = shop ? `_${shop.name}` : '';
+      link.download = `数据巡检${periodLabel}${shopSuffix}_${format(selectedDate, 'yyyyMMdd')}.txt`;
       link.click();
     }
+  };
+
+  const saveSubscription = () => {
+    updateSubscription(subscription);
+    setShowSubscriptionModal(false);
   };
 
   return (
@@ -197,6 +204,23 @@ ${periodPending.length > 0
               </div>
 
               <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">巡检店铺</label>
+                <select
+                  value={selectedShopId}
+                  onChange={(e) => {
+                    setSelectedShopId(e.target.value);
+                    setGeneratedReport(null);
+                  }}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">全部店铺</option>
+                  {shops.filter(s => s.status === 'active').map((shop) => (
+                    <option key={shop.id} value={shop.id}>{shop.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">报告日期</label>
                 <div className="relative">
                   <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
@@ -225,6 +249,7 @@ ${periodPending.length > 0
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
             <h3 className="font-semibold text-slate-900 mb-4">
               {reportType === 'daily' ? '今日' : reportType === 'weekly' ? '本周' : '本月'}统计
+              {shop && <span className="text-sm font-normal text-slate-500 ml-2">({shop.name})</span>}
             </h3>
             <div className="space-y-3">
               <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
@@ -265,30 +290,29 @@ ${periodPending.length > 0
               </button>
             </div>
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-600">订阅状态</span>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  subscription.enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'
-                }`}>
-                  {subscription.enabled ? '已开启' : '未开启'}
-                </span>
-              </div>
-              {subscription.enabled && (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-slate-600">接收方式</span>
-                    <span className="text-sm text-slate-900">{subscription.methods.join(', ')}</span>
+              {(['daily', 'weekly', 'monthly'] as const).map((type) => {
+                const sub = subscription[type];
+                const label = type === 'daily' ? '日报' : type === 'weekly' ? '周报' : '月报';
+                const recipients = users.filter(u => sub.userIds.includes(u.id)).map(u => u.name);
+                return (
+                  <div key={type} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${sub.enabled ? 'bg-green-500' : 'bg-slate-300'}`}></div>
+                      <span className="text-sm text-slate-700">{label}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${sub.enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                        {sub.enabled ? '已开启' : '未开启'}
+                      </span>
+                      {sub.enabled && sub.lastSentAt && (
+                        <p className="text-xs text-slate-400 mt-1">
+                          最近: {format(new Date(sub.lastSentAt), 'MM-dd HH:mm', { locale: zhCN })}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-slate-600">接收人</span>
-                    <span className="text-sm text-slate-900">
-                      {subscription.userIds.length > 0 
-                        ? users.filter(u => subscription.userIds.includes(u.id)).map(u => u.name).join(', ')
-                        : '未设置'}
-                    </span>
-                  </div>
-                </>
-              )}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -338,8 +362,8 @@ ${periodPending.length > 0
 
       {showSubscriptionModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white">
               <h2 className="text-xl font-semibold text-slate-900">订阅设置</h2>
               <button
                 onClick={() => setShowSubscriptionModal(false)}
@@ -348,85 +372,97 @@ ${periodPending.length > 0
                 <X className="w-5 h-5 text-slate-500" />
               </button>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={subscription.enabled}
-                    onChange={(e) => setSubscription({ ...subscription, enabled: e.target.checked })}
-                    className="w-5 h-5 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
-                  />
-                  <span className="text-sm font-medium text-slate-700">开启消息订阅</span>
-                </label>
-              </div>
-              
-              {subscription.enabled && (
-                <>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">接收方式</label>
-                    <div className="space-y-2">
-                      {['站内信', '邮件', '短信'].map((method) => (
-                        <label key={method} className="flex items-center gap-3 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={subscription.methods.includes(method)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSubscription({
-                                  ...subscription,
-                                  methods: [...subscription.methods, method],
-                                });
-                              } else {
-                                setSubscription({
-                                  ...subscription,
-                                  methods: subscription.methods.filter((m) => m !== method),
-                                });
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
-                          />
-                          <span className="text-sm text-slate-700">{method}</span>
-                        </label>
-                      ))}
+            <div className="p-6 space-y-6">
+              {(['daily', 'weekly', 'monthly'] as const).map((type) => {
+                const label = type === 'daily' ? '日报' : type === 'weekly' ? '周报' : '月报';
+                const sub = subscription[type];
+                return (
+                  <div key={type} className="border border-slate-200 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="font-semibold text-slate-900">{label}订阅</h4>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={sub.enabled}
+                          onChange={(e) => setSubscription({
+                            ...subscription,
+                            [type]: { ...sub, enabled: e.target.checked },
+                          })}
+                          className="w-5 h-5 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                        />
+                        <span className="text-sm font-medium text-slate-700">
+                          {sub.enabled ? '已开启' : '已关闭'}
+                        </span>
+                      </label>
                     </div>
-                  </div>
+                    
+                    {sub.enabled && (
+                      <>
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-slate-700 mb-2">接收方式</label>
+                          <div className="flex gap-4">
+                            {['站内信', '邮件', '短信'].map((method) => (
+                              <label key={method} className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={sub.methods.includes(method)}
+                                  onChange={(e) => {
+                                    const newMethods = e.target.checked
+                                      ? [...sub.methods, method]
+                                      : sub.methods.filter((m) => m !== method);
+                                    setSubscription({
+                                      ...subscription,
+                                      [type]: { ...sub, methods: newMethods },
+                                    });
+                                  }}
+                                  className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                                />
+                                <span className="text-sm text-slate-700">{method}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">接收人</label>
-                    <div className="space-y-2 max-h-40 overflow-y-auto">
-                      {users.filter(u => u.role === 'operator' || u.role === 'admin').map((user) => (
-                        <label key={user.id} className="flex items-center gap-3 cursor-pointer p-2 hover:bg-slate-50 rounded-lg">
-                          <input
-                            type="checkbox"
-                            checked={subscription.userIds.includes(user.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSubscription({
-                                  ...subscription,
-                                  userIds: [...subscription.userIds, user.id],
-                                });
-                              } else {
-                                setSubscription({
-                                  ...subscription,
-                                  userIds: subscription.userIds.filter((id) => id !== user.id),
-                                });
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
-                          />
-                          <span className="text-sm text-slate-700">{user.name}</span>
-                          <span className="text-xs text-slate-400">
-                            ({user.role === 'admin' ? '管理员' : '运营专员'})
-                          </span>
-                        </label>
-                      ))}
-                    </div>
+                        <div>
+                          <label className="block text-sm font-medium text-slate-700 mb-2">接收人</label>
+                          <div className="space-y-2 max-h-32 overflow-y-auto">
+                            {users.filter(u => u.role === 'operator' || u.role === 'admin').map((user) => (
+                              <label key={user.id} className="flex items-center gap-2 cursor-pointer p-2 hover:bg-slate-50 rounded-lg">
+                                <input
+                                  type="checkbox"
+                                  checked={sub.userIds.includes(user.id)}
+                                  onChange={(e) => {
+                                    const newUserIds = e.target.checked
+                                      ? [...sub.userIds, user.id]
+                                      : sub.userIds.filter((id) => id !== user.id);
+                                    setSubscription({
+                                      ...subscription,
+                                      [type]: { ...sub, userIds: newUserIds },
+                                    });
+                                  }}
+                                  className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                                />
+                                <span className="text-sm text-slate-700">{user.name}</span>
+                                <span className="text-xs text-slate-400">
+                                  ({user.role === 'admin' ? '管理员' : '运营专员'})
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        {sub.lastSentAt && (
+                          <p className="text-xs text-slate-400 mt-3">
+                            最近发送: {format(new Date(sub.lastSentAt), 'yyyy-MM-dd HH:mm', { locale: zhCN })}
+                          </p>
+                        )}
+                      </>
+                    )}
                   </div>
-                </>
-              )}
+                );
+              })}
             </div>
-            <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
+            <div className="p-6 border-t border-slate-200 flex justify-end gap-3 sticky bottom-0 bg-white">
               <button
                 onClick={() => setShowSubscriptionModal(false)}
                 className="px-5 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 hover:bg-slate-50"

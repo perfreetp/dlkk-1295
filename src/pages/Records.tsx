@@ -253,9 +253,13 @@ export default function Records() {
 
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
             <h3 className="font-semibold text-slate-900 mb-4">历史巡检记录</h3>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {inspectionHistory.slice(0, 10).map((record) => (
-                <div key={record.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                <Link
+                  key={record.id}
+                  to={`/inspections/${record.id}`}
+                  className="flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors group"
+                >
                   <div className="flex items-center gap-3">
                     <div className={`w-2 h-2 rounded-full ${
                       record.status === 'running' ? 'bg-blue-500 animate-pulse' : 
@@ -270,7 +274,7 @@ export default function Records() {
                       </span>
                     </div>
                   </div>
-                  <div className="text-right">
+                  <div className="flex items-center gap-2">
                     <span className={`text-sm ${
                       record.status === 'running' ? 'text-blue-600' :
                       record.anomaliesFound > 0 ? 'text-orange-600' : 'text-green-600'
@@ -278,7 +282,7 @@ export default function Records() {
                       {record.status === 'running' ? '进行中' : `${record.anomaliesFound}个异常`}
                     </span>
                   </div>
-                </div>
+                </Link>
               ))}
               {inspectionHistory.length === 0 && (
                 <p className="text-sm text-slate-400 text-center py-4">暂无巡检记录</p>

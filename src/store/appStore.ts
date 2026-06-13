@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { User, Notification, Shop, InspectionHistory } from '../types';
+import { User, Notification, Shop, InspectionHistory, ReportSubscription } from '../types';
 import { shops as initialShops, users as initialUsers, notifications as initialNotifications } from '../data/mockData';
+
+const defaultSubscription: ReportSubscription = {
+  daily: { enabled: false, methods: ['站内信'], userIds: [], lastSentAt: null },
+  weekly: { enabled: false, methods: ['站内信'], userIds: [], lastSentAt: null },
+  monthly: { enabled: false, methods: ['站内信'], userIds: [], lastSentAt: null },
+};
 
 interface AppState {
   currentUser: User | null;
@@ -12,15 +18,19 @@ interface AppState {
   selectedShopId: string;
   selectedDateRange: { start: Date; end: Date };
   inspectionHistory: InspectionHistory[];
+  subscription: ReportSubscription;
   setCurrentUser: (user: User | null) => void;
   addNotification: (notification: Omit<Notification, 'id' | 'createdAt'>) => void;
   markNotificationAsRead: (id: string) => void;
   markAllNotificationsAsRead: () => void;
   setSelectedShopId: (shopId: string) => void;
   setSelectedDateRange: (range: { start: Date; end: Date }) => void;
-  startInspection: (totalRules: number) => string;
+  startInspection: (totalRules: number, anomalyIds?: string[], hitRuleIds?: string[], shopId?: string) => string;
   completeInspection: (id: string, anomaliesFound: number, criticalCount: number, warningCount: number, infoCount: number) => void;
   getLatestInspection: () => InspectionHistory | null;
+  getInspectionById: (id: string) => InspectionHistory | undefined;
+  updateSubscription: (subscription: Partial<ReportSubscription>) => void;
+  getSubscription: () => ReportSubscription;
 }
 
 export const useAppStore = create<AppState>()(
@@ -37,6 +47,7 @@ export const useAppStore = create<AppState>()(
         end: new Date(),
       },
       inspectionHistory: [],
+      subscription: defaultSubscription,
       setCurrentUser: (user) => set({ currentUser: user }),
       addNotification: (notification) => {
         const newNotification: Notification = {
@@ -71,7 +82,7 @@ export const useAppStore = create<AppState>()(
       },
       setSelectedShopId: (shopId) => set({ selectedShopId: shopId }),
       setSelectedDateRange: (range) => set({ selectedDateRange: range }),
-      startInspection: (totalRules: number) => {
+      startInspection: (totalRules, anomalyIds = [], hitRuleIds = [], shopId) => {
         const user = get().currentUser;
         const newInspection: InspectionHistory = {
           id: `insp-${Date.now()}`,
@@ -86,6 +97,9 @@ export const useAppStore = create<AppState>()(
           summary: '',
           operatorId: user?.id || 'system',
           operatorName: user?.name || '系统',
+          anomalyIds,
+          hitRuleIds,
+          shopId,
         };
         set((state) => ({
           inspectionHistory: [newInspection, ...state.inspectionHistory],
@@ -125,6 +139,15 @@ export const useAppStore = create<AppState>()(
         const history = get().inspectionHistory;
         return history.length > 0 ? history[0] : null;
       },
+      getInspectionById: (id) => {
+        return get().inspectionHistory.find((h) => h.id === id);
+      },
+      updateSubscription: (subscription) => {
+        set((state) => ({
+          subscription: { ...state.subscription, ...subscription },
+        }));
+      },
+      getSubscription: () => get().subscription,
     }),
     {
       name: 'app-storage',
@@ -133,6 +156,7 @@ export const useAppStore = create<AppState>()(
         selectedShopId: state.selectedShopId,
         selectedDateRange: state.selectedDateRange,
         inspectionHistory: state.inspectionHistory,
+        subscription: state.subscription,
       }),
     }
   )

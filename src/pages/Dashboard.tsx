@@ -257,26 +257,41 @@ export default function Dashboard() {
 
           <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-6 text-white">
             <h3 className="font-semibold mb-4">最近巡检记录</h3>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {inspectionHistory.slice(0, 5).map((record) => (
-                <div key={record.id} className="flex items-center justify-between text-sm">
-                  <span className="text-slate-300">
-                    {format(new Date(record.startTime), 'MM-dd HH:mm')}
-                  </span>
-                  {record.status === 'running' ? (
-                    <span className="text-blue-400 flex items-center gap-1">
-                      <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
-                      进行中
+                <Link
+                  key={record.id}
+                  to={`/inspections/${record.id}`}
+                  className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-white/10 transition-colors group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${
+                      record.status === 'running' ? 'bg-blue-400 animate-pulse' : 
+                      record.anomaliesFound > 0 ? 'bg-orange-400' : 'bg-green-400'
+                    }`}></div>
+                    <span className="text-slate-300">
+                      {format(new Date(record.startTime), 'MM-dd HH:mm')}
                     </span>
-                  ) : (
-                    <span className={record.anomaliesFound > 0 ? 'text-orange-400' : 'text-green-400'}>
-                      完成 ({record.anomaliesFound}个异常)
+                    <span className="text-slate-500 text-xs group-hover:text-slate-300">
+                      {record.operatorName}
                     </span>
-                  )}
-                </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {record.status === 'running' ? (
+                      <span className="text-blue-400 flex items-center gap-1">
+                        进行中
+                      </span>
+                    ) : (
+                      <span className={record.anomaliesFound > 0 ? 'text-orange-400' : 'text-green-400'}>
+                        {record.anomaliesFound}个异常
+                      </span>
+                    )}
+                    <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
+                  </div>
+                </Link>
               ))}
               {inspectionHistory.length === 0 && (
-                <p className="text-slate-400 text-sm text-center py-2">暂无巡检记录</p>
+                <p className="text-slate-400 text-sm text-center py-4">暂无巡检记录</p>
               )}
             </div>
             <div className="mt-4 pt-4 border-t border-slate-700">

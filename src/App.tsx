@@ -6,6 +6,7 @@ import Anomalies from "./pages/Anomalies";
 import AnomalyDetail from "./pages/AnomalyDetail";
 import Records from "./pages/Records";
 import Reports from "./pages/Reports";
+import InspectionHistoryDetail from "./pages/InspectionHistoryDetail";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="anomalies/:id" element={<AnomalyDetail />} />
           <Route path="records" element={<Records />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="inspections/:id" element={<InspectionHistoryDetail />} />
         </Route>
       </Routes>
     </Router>
