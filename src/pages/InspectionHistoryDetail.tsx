@@ -8,15 +8,18 @@ import {
   List,
   TrendingUp,
   User,
-  History
+  History,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
+import { useState } from 'react';
 import { useAppStore } from '../store/appStore';
 import { useRuleStore } from '../store/ruleStore';
 import { useAnomalyStore } from '../store/anomalyStore';
 import Badge from '../components/common/Badge';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { ANOMALY_STATUS_LABELS } from '../types';
+import { ANOMALY_STATUS_LABELS, ProcessingRecord } from '../types';
 
 export default function InspectionHistoryDetail() {
   const { id } = useParams<{ id: string }>();
@@ -55,6 +58,36 @@ export default function InspectionHistoryDetail() {
     critical: inspection.anomalySnapshots.filter(a => a.level === 'critical'),
     warning: inspection.anomalySnapshots.filter(a => a.level === 'warning'),
     info: inspection.anomalySnapshots.filter(a => a.level === 'info'),
+  };
+
+  const allRecords: { record: ProcessingRecord; snapshotTitle: string }[] = [];
+  inspection.anomalySnapshots.forEach(snapshot => {
+    const records = getRecordsByAnomalyId(snapshot.id);
+    records.forEach(record => {
+      allRecords.push({ record, snapshotTitle: snapshot.title });
+    });
+  });
+  allRecords.sort((a, b) => new Date(b.record.createdAt).getTime() - new Date(a.record.createdAt).getTime());
+
+  const getActionLabel = (action: string) => {
+    switch (action) {
+      case 'assigned': return '指派';
+      case 'resolved': return '解决';
+      case 'ignored': return '忽略';
+      case 'level_changed': return '改级别';
+      case 'comment': return '备注';
+      default: return action;
+    }
+  };
+
+  const getActionColor = (action: string) => {
+    switch (action) {
+      case 'resolved': return 'bg-green-500';
+      case 'ignored': return 'bg-slate-400';
+      case 'assigned': return 'bg-blue-500';
+      case 'level_changed': return 'bg-orange-500';
+      default: return 'bg-slate-500';
+    }
   };
 
   return (
@@ -172,141 +205,157 @@ export default function InspectionHistoryDetail() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex items-center gap-3">
-            <Target className="w-5 h-5 text-purple-600" />
-            <h3 className="font-semibold text-slate-900">命中规则</h3>
-            <span className="ml-auto text-sm text-slate-500">{hitRules.length}条</span>
-          </div>
-          <div className="divide-y divide-slate-100">
-            {hitRules.length > 0 ? (
-              hitRules.map((rule) => rule && (
-                <div key={rule.id} className="p-4 flex items-center justify-between">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-6 border-b border-slate-200 flex items-center gap-3">
+          <Target className="w-5 h-5 text-purple-600" />
+          <h3 className="font-semibold text-slate-900">当时命中规则</h3>
+          <span className="ml-auto text-sm text-slate-500">{hitRules.length}条</span>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {hitRules.length > 0 ? (
+            hitRules.map((rule) => rule && (
+              <div key={rule.id} className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${
+                    rule.level === 'critical' ? 'bg-red-100 text-red-600' :
+                    rule.level === 'warning' ? 'bg-orange-100 text-orange-600' :
+                    'bg-blue-100 text-blue-600'
+                  }`}>
+                    <Target className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-slate-900">{rule.name}</p>
+                    <p className="text-sm text-slate-500">{rule.description}</p>
+                  </div>
+                </div>
+                <Badge variant="level" value={rule.level} />
+              </div>
+            ))
+          ) : (
+            <div className="p-8 text-center text-slate-400">
+              <Target className="w-10 h-10 mx-auto mb-2 opacity-50" />
+              <p>未命中任何规则</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-6 border-b border-slate-200 flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-orange-600" />
+          <h3 className="font-semibold text-slate-900">当时异常快照</h3>
+          <span className="ml-auto text-sm text-slate-500">{inspection.anomalySnapshots.length}条</span>
+        </div>
+        <div className="divide-y divide-slate-100 max-h-[500px] overflow-y-auto">
+          {inspection.anomalySnapshots.length > 0 ? (
+            inspection.anomalySnapshots.map((snapshot) => (
+              <div key={snapshot.id} className="p-4">
+                <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
                     <div className={`p-2 rounded-lg ${
-                      rule.level === 'critical' ? 'bg-red-100 text-red-600' :
-                      rule.level === 'warning' ? 'bg-orange-100 text-orange-600' :
+                      snapshot.level === 'critical' ? 'bg-red-100 text-red-600' :
+                      snapshot.level === 'warning' ? 'bg-orange-100 text-orange-600' :
                       'bg-blue-100 text-blue-600'
                     }`}>
-                      <Target className="w-4 h-4" />
+                      <AlertTriangle className="w-4 h-4" />
                     </div>
                     <div>
-                      <p className="font-medium text-slate-900">{rule.name}</p>
-                      <p className="text-sm text-slate-500">{rule.description}</p>
+                      <p className="font-medium text-slate-900">{snapshot.title}</p>
+                      <p className="text-sm text-slate-500 truncate max-w-md">{snapshot.description}</p>
                     </div>
                   </div>
-                  <Badge variant="level" value={rule.level} />
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge variant="level" value={snapshot.level} />
+                    <Badge variant="status" value={snapshot.status} />
+                  </div>
                 </div>
-              ))
-            ) : (
-              <div className="p-8 text-center text-slate-400">
-                <Target className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                <p>未命中任何规则</p>
+                <div className="mt-3 ml-11 grid grid-cols-4 gap-3 text-xs text-slate-500">
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-400">处理人:</span>
+                    <span className="text-slate-700">{snapshot.assigneeName || '未指派'}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-400">当时状态:</span>
+                    <span className="text-slate-700">{ANOMALY_STATUS_LABELS[snapshot.status]}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-400">实际值:</span>
+                    <span className="text-slate-700">{snapshot.actualValue}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-400">阈值:</span>
+                    <span className="text-slate-700">{snapshot.threshold}</span>
+                  </div>
+                </div>
+                {snapshot.resolution && (
+                  <div className="mt-2 ml-11 p-2 bg-slate-50 rounded text-xs">
+                    <span className="text-slate-400">处理说明:</span> {snapshot.resolution}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            ))
+          ) : (
+            <div className="p-8 text-center text-slate-400">
+              <CheckCircle className="w-10 h-10 mx-auto mb-2 opacity-50" />
+              <p>本次巡检未发现异常</p>
+            </div>
+          )}
         </div>
+      </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="p-6 border-b border-slate-200 flex items-center gap-3">
-            <AlertTriangle className="w-5 h-5 text-orange-600" />
-            <h3 className="font-semibold text-slate-900">异常快照</h3>
-            <span className="ml-auto text-sm text-slate-500">{inspection.anomalySnapshots.length}条</span>
-          </div>
-          <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
-            {inspection.anomalySnapshots.length > 0 ? (
-              inspection.anomalySnapshots.map((snapshot) => {
-                const processingRecords = getRecordsByAnomalyId(snapshot.id);
-                const hasProcessingHistory = processingRecords.length > 0;
-                return (
-                <div key={snapshot.id} className="p-4">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${
-                        snapshot.level === 'critical' ? 'bg-red-100 text-red-600' :
-                        snapshot.level === 'warning' ? 'bg-orange-100 text-orange-600' :
-                        'bg-blue-100 text-blue-600'
-                      }`}>
-                        <AlertTriangle className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-slate-900">{snapshot.title}</p>
-                        <p className="text-sm text-slate-500 truncate max-w-xs">{snapshot.description}</p>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <Badge variant="level" value={snapshot.level} />
-                      <Badge variant="status" value={snapshot.status} />
-                    </div>
-                  </div>
-                  <div className="ml-11 grid grid-cols-3 gap-2 text-xs text-slate-500">
-                    <div>
-                      <span className="text-slate-400">处理人:</span> {snapshot.assigneeName || '未指派'}
-                    </div>
-                    <div>
-                      <span className="text-slate-400">当时状态:</span> {ANOMALY_STATUS_LABELS[snapshot.status]}
-                    </div>
-                    <div>
-                      <span className="text-slate-400">实际值:</span> {snapshot.actualValue}
-                    </div>
-                  </div>
-                  {snapshot.resolution && (
-                    <div className="ml-11 mt-2 p-2 bg-slate-50 rounded text-xs">
-                      <span className="text-slate-400">处理说明:</span> {snapshot.resolution}
-                    </div>
-                  )}
-                  {hasProcessingHistory && (
-                    <div className="ml-11 mt-3 pt-3 border-t border-slate-100">
-                      <div className="flex items-center gap-2 mb-2">
-                        <History className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="text-xs text-slate-500 font-medium">后续处理记录</span>
-                      </div>
-                      <div className="space-y-2">
-                        {processingRecords.slice(0, 3).map((record) => (
-                          <div key={record.id} className="flex items-start gap-2 text-xs">
-                            <div className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${
-                              record.action === 'resolved' ? 'bg-green-500' :
-                              record.action === 'ignored' ? 'bg-slate-400' :
-                              record.action === 'assigned' ? 'bg-blue-500' :
-                              'bg-orange-500'
-                            }`}></div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-slate-700">{record.operatorName}</span>
-                                <span className="text-slate-400">{
-                                  record.action === 'assigned' ? '指派' :
-                                  record.action === 'resolved' ? '解决' :
-                                  record.action === 'ignored' ? '忽略' :
-                                  record.action === 'level_changed' ? '改级别' :
-                                  '备注'
-                                }</span>
-                                {record.newValue && record.newValue !== record.operatorName && (
-                                  <span className="text-blue-600">{record.newValue}</span>
-                                )}
-                              </div>
-                              {record.comment && (
-                                <p className="text-slate-500 mt-0.5 truncate">{record.comment}</p>
-                              )}
-                              <p className="text-slate-400 mt-0.5">
-                                {format(new Date(record.createdAt), 'MM-dd HH:mm', { locale: zhCN })}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )})
-            ) : (
-              <div className="p-8 text-center text-slate-400">
-                <CheckCircle className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                <p>本次巡检未发现异常</p>
-              </div>
-            )}
-          </div>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-6 border-b border-slate-200 flex items-center gap-3">
+          <History className="w-5 h-5 text-green-600" />
+          <h3 className="font-semibold text-slate-900">后续处理时间线</h3>
+          <span className="ml-auto text-sm text-slate-500">{allRecords.length}条记录</span>
         </div>
+        {allRecords.length > 0 ? (
+          <div className="p-6">
+            <div className="relative">
+              <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-slate-200"></div>
+              <div className="space-y-6">
+                {allRecords.map(({ record, snapshotTitle }, index) => (
+                  <div key={record.id} className="relative flex gap-4">
+                    <div className={`w-3 h-3 rounded-full ${getActionColor(record.action)} border-2 border-white shadow-sm z-10 flex-shrink-0 mt-1`}></div>
+                    <div className="flex-1 pb-6 border-b border-slate-100 last:border-0 last:pb-0">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-slate-900">{record.operatorName}</span>
+                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                              record.action === 'resolved' ? 'bg-green-100 text-green-700' :
+                              record.action === 'ignored' ? 'bg-slate-100 text-slate-600' :
+                              record.action === 'assigned' ? 'bg-blue-100 text-blue-700' :
+                              'bg-orange-100 text-orange-700'
+                            }`}>
+                              {getActionLabel(record.action)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">
+                            {format(new Date(record.createdAt), 'yyyy-MM-dd HH:mm:ss', { locale: zhCN })}
+                          </p>
+                          {record.comment && (
+                            <p className="text-sm text-slate-600 mt-2 p-2 bg-slate-50 rounded-lg">
+                              {record.comment}
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-400 max-w-[200px] text-right">
+                          关联: {snapshotTitle}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="p-12 text-center text-slate-400">
+            <History className="w-10 h-10 mx-auto mb-2 opacity-50" />
+            <p>暂无后续处理记录</p>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">

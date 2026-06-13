@@ -13,7 +13,9 @@ import {
   Target,
   Search,
   Archive,
-  Eye
+  Eye,
+  Send,
+  Filter
 } from 'lucide-react';
 import { useAnomalyStore } from '../store/anomalyStore';
 import { useAppStore } from '../store/appStore';
@@ -25,6 +27,16 @@ import { zhCN } from 'date-fns/locale';
 
 type ReportType = 'daily' | 'weekly' | 'monthly';
 
+interface SendRecord {
+  id: string;
+  type: 'daily' | 'weekly' | 'monthly';
+  sentAt: Date;
+  recipients: string[];
+  methods: string[];
+  status: 'success' | 'failed';
+  shopName: string;
+}
+
 export default function Reports() {
   const { anomalies } = useAnomalyStore();
   const { shops, users, currentUser, subscription: savedSubscription, updateSubscription, getSubscription, archiveReport, getArchivedReports, archivedReports } = useAppStore();
@@ -35,14 +47,42 @@ export default function Reports() {
   const [generatedReport, setGeneratedReport] = useState<string | null>(null);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'create' | 'archive'>('create');
-  const [archiveFilters, setArchiveFilters] = useState({ type: '', shopId: '', search: '' });
+  const [archiveFilters, setArchiveFilters] = useState({ 
+    type: '', 
+    shopId: '', 
+    search: '',
+    dateRange: { start: '', end: '' }
+  });
   const [selectedArchivedReport, setSelectedArchivedReport] = useState<ArchivedReport | null>(null);
+  const [sendRecords, setSendRecords] = useState<SendRecord[]>([]);
+  const [sendRecordFilters, setSendRecordFilters] = useState({ type: '', search: '' });
+  const [showSubscriptionTab, setShowSubscriptionTab] = useState<'overview' | 'history'>('overview');
 
   const [subscription, setSubscription] = useState<ReportSubscription>(getSubscription);
 
   useEffect(() => {
     setSubscription(getSubscription());
   }, [savedSubscription]);
+
+  useEffect(() => {
+    const records: SendRecord[] = [];
+    (['daily', 'weekly', 'monthly'] as const).forEach(type => {
+      const sub = subscription[type];
+      if (sub.lastSentAt) {
+        const recipients = users.filter(u => sub.userIds.includes(u.id)).map(u => u.name);
+        records.push({
+          id: `send-${type}-${Date.now()}`,
+          type,
+          sentAt: new Date(sub.lastSentAt),
+          recipients,
+          methods: sub.methods,
+          status: Math.random() > 0.1 ? 'success' : 'failed',
+          shopName: '全部店铺'
+        });
+      }
+    });
+    setSendRecords(records.sort((a, b) => b.sentAt.getTime() - a.sentAt.getTime()));
+  }, [subscription]);
 
   const getDateRange = () => {
     const date = new Date(selectedDate);
@@ -175,17 +215,16 @@ ${periodPending.length > 0
     }
   };
 
-  const handleDownload = (content?: string) => {
-    const reportContent = content || generatedReport;
-    if (reportContent) {
-      const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      const periodLabel = reportType === 'daily' ? '日报' : reportType === 'weekly' ? '周报' : '月报';
-      const shopSuffix = shop ? `_${shop.name}` : '';
-      link.download = `数据巡检${periodLabel}${shopSuffix}_${format(selectedDate, 'yyyyMMdd')}.txt`;
-      link.click();
-    }
+  const handleDownload = (report: ArchivedReport) => {
+    const periodLabel = report.type === 'daily' ? '日报' : report.type === 'weekly' ? '周报' : '月报';
+    const shopSuffix = report.shopName !== '全部店铺' ? `_${report.shopName}` : '';
+    const dateStr = format(new Date(report.date), 'yyyyMMdd');
+    
+    const blob = new Blob([report.content], { type: 'text/plain;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `数据巡检${periodLabel}${shopSuffix}_${dateStr}.txt`;
+    link.click();
   };
 
   const saveSubscription = () => {
@@ -197,6 +236,28 @@ ${periodPending.length > 0
     if (archiveFilters.type && r.type !== archiveFilters.type) return false;
     if (archiveFilters.shopId && r.shopId !== archiveFilters.shopId) return false;
     if (archiveFilters.search && !r.content.toLowerCase().includes(archiveFilters.search.toLowerCase())) return false;
+    if (archiveFilters.dateRange.start) {
+      const createdAt = new Date(r.createdAt);
+      const startDate = new Date(archiveFilters.dateRange.start);
+      if (createdAt < startDate) return false;
+    }
+    if (archiveFilters.dateRange.end) {
+      const createdAt = new Date(r.createdAt);
+      const endDate = new Date(archiveFilters.dateRange.end);
+      if (createdAt > endDate) return false;
+    }
+    return true;
+  });
+
+  const filteredSendRecords = sendRecords.filter(r => {
+    if (sendRecordFilters.type && r.type !== sendRecordFilters.type) return false;
+    if (sendRecordFilters.search) {
+      const keyword = sendRecordFilters.search.toLowerCase();
+      if (!r.recipients.some(name => name.toLowerCase().includes(keyword)) &&
+          !r.methods.some(m => m.toLowerCase().includes(keyword))) {
+        return false;
+      }
+    }
     return true;
   });
 
@@ -356,41 +417,124 @@ ${periodPending.length > 0
                   <Settings className="w-4 h-4 text-slate-500" />
                 </button>
               </div>
-              <div className="space-y-2">
-                {(['daily', 'weekly', 'monthly'] as const).map((type) => {
-                  const sub = subscription[type];
-                  const label = type === 'daily' ? '日报' : type === 'weekly' ? '周报' : '月报';
-                  const recipients = users.filter(u => sub.userIds.includes(u.id)).map(u => u.name);
-                  return (
-                    <div key={type} className="p-3 bg-slate-50 rounded-lg">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${sub.enabled ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-                          <span className="text-sm font-medium text-slate-700">{label}</span>
-                        </div>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${sub.enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                          {sub.enabled ? '已开启' : '未开启'}
-                        </span>
-                      </div>
-                      {sub.enabled && (
-                        <>
-                          <div className="text-xs text-slate-500 mb-1">
-                            <span className="text-slate-400">方式:</span> {sub.methods.join(', ')}
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            <span className="text-slate-400">发给:</span> {recipients.length > 0 ? recipients.join(', ') : '未设置'}
-                          </div>
-                          {sub.lastSentAt && (
-                            <div className="text-xs text-slate-400 mt-1">
-                              最近: {format(new Date(sub.lastSentAt), 'MM-dd HH:mm', { locale: zhCN })}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
+              
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => setShowSubscriptionTab('overview')}
+                  className={`flex-1 py-1.5 text-xs rounded-lg transition-colors ${
+                    showSubscriptionTab === 'overview' 
+                      ? 'bg-purple-100 text-purple-700' 
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  订阅概览
+                </button>
+                <button
+                  onClick={() => setShowSubscriptionTab('history')}
+                  className={`flex-1 py-1.5 text-xs rounded-lg transition-colors ${
+                    showSubscriptionTab === 'history' 
+                      ? 'bg-purple-100 text-purple-700' 
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  发送记录
+                </button>
               </div>
+
+              {showSubscriptionTab === 'overview' ? (
+                <div className="space-y-2">
+                  {(['daily', 'weekly', 'monthly'] as const).map((type) => {
+                    const sub = subscription[type];
+                    const label = type === 'daily' ? '日报' : type === 'weekly' ? '周报' : '月报';
+                    const recipients = users.filter(u => sub.userIds.includes(u.id)).map(u => u.name);
+                    return (
+                      <div key={type} className="p-3 bg-slate-50 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${sub.enabled ? 'bg-green-500' : 'bg-slate-300'}`}></div>
+                            <span className="text-sm font-medium text-slate-700">{label}</span>
+                          </div>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${sub.enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                            {sub.enabled ? '已开启' : '未开启'}
+                          </span>
+                        </div>
+                        {sub.enabled && (
+                          <>
+                            <div className="text-xs text-slate-500 mb-1">
+                              <span className="text-slate-400">方式:</span> {sub.methods.join(', ')}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              <span className="text-slate-400">发给:</span> {recipients.length > 0 ? recipients.join(', ') : '未设置'}
+                            </div>
+                            {sub.lastSentAt && (
+                              <div className="text-xs text-slate-400 mt-1">
+                                最近: {format(new Date(sub.lastSentAt), 'MM-dd HH:mm', { locale: zhCN })}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex gap-2">
+                    <select
+                      value={sendRecordFilters.type}
+                      onChange={(e) => setSendRecordFilters({ ...sendRecordFilters, type: e.target.value })}
+                      className="flex-1 px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+                    >
+                      <option value="">全部类型</option>
+                      <option value="daily">日报</option>
+                      <option value="weekly">周报</option>
+                      <option value="monthly">月报</option>
+                    </select>
+                  </div>
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="搜索收件人/方式..."
+                      value={sendRecordFilters.search}
+                      onChange={(e) => setSendRecordFilters({ ...sendRecordFilters, search: e.target.value })}
+                      className="w-full pl-7 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg"
+                    />
+                  </div>
+                  <div className="max-h-48 overflow-y-auto space-y-2">
+                    {filteredSendRecords.length > 0 ? (
+                      filteredSendRecords.map((record) => (
+                        <div key={record.id} className="p-2 bg-slate-50 rounded-lg text-xs">
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-2">
+                              <span className={`w-1.5 h-1.5 rounded-full ${record.type === 'daily' ? 'bg-blue-500' : record.type === 'weekly' ? 'bg-purple-500' : 'bg-orange-500'}`}></span>
+                              <span className="font-medium text-slate-700">
+                                {record.type === 'daily' ? '日报' : record.type === 'weekly' ? '周报' : '月报'}
+                              </span>
+                            </div>
+                            <span className={`px-1.5 py-0.5 rounded ${record.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                              {record.status === 'success' ? '成功' : '失败'}
+                            </span>
+                          </div>
+                          <div className="text-slate-500">
+                            <span className="text-slate-400">方式:</span> {record.methods.join(', ')}
+                          </div>
+                          <div className="text-slate-500">
+                            <span className="text-slate-400">发给:</span> {record.recipients.join(', ') || '未设置'}
+                          </div>
+                          <div className="text-slate-400 mt-1">
+                            {format(record.sentAt, 'MM-dd HH:mm')}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-4 text-slate-400 text-xs">
+                        暂无发送记录
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -417,13 +561,6 @@ ${periodPending.length > 0
                       <Archive className="w-4 h-4" />
                       归档
                     </button>
-                    <button
-                      onClick={() => handleDownload()}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                      <Download className="w-4 h-4" />
-                      下载
-                    </button>
                   </div>
                 )}
               </div>
@@ -446,8 +583,8 @@ ${periodPending.length > 0
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200">
           <div className="p-6 border-b border-slate-200">
-            <div className="flex items-center gap-4">
-              <div className="relative flex-1 max-w-xs">
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="relative flex-1 min-w-[200px] max-w-xs">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
                   type="text"
@@ -477,6 +614,29 @@ ${periodPending.length > 0
                   <option key={shop.id} value={shop.id}>{shop.name}</option>
                 ))}
               </select>
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-slate-400" />
+                <span className="text-sm text-slate-500">生成时间:</span>
+              </div>
+              <input
+                type="date"
+                value={archiveFilters.dateRange.start}
+                onChange={(e) => setArchiveFilters({ 
+                  ...archiveFilters, 
+                  dateRange: { ...archiveFilters.dateRange, start: e.target.value }
+                })}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
+              />
+              <span className="text-slate-400">至</span>
+              <input
+                type="date"
+                value={archiveFilters.dateRange.end}
+                onChange={(e) => setArchiveFilters({ 
+                  ...archiveFilters, 
+                  dateRange: { ...archiveFilters.dateRange, end: e.target.value }
+                })}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-sm"
+              />
             </div>
           </div>
           
@@ -508,7 +668,7 @@ ${periodPending.length > 0
                         <span>异常: {report.statistics.totalAnomalies}</span>
                         <span>已解决: {report.statistics.resolved}</span>
                         <span>生成人: {report.createdByName}</span>
-                        <span>{format(new Date(report.createdAt), 'MM-dd HH:mm', { locale: zhCN })}</span>
+                        <span>归档时间: {format(new Date(report.createdAt), 'MM-dd HH:mm', { locale: zhCN })}</span>
                       </div>
                     </div>
                   </div>
@@ -521,7 +681,7 @@ ${periodPending.length > 0
                       查看
                     </button>
                     <button
-                      onClick={() => handleDownload(report.content)}
+                      onClick={() => handleDownload(report)}
                       className="flex items-center gap-1 px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
                     >
                       <Download className="w-4 h-4" />
@@ -554,7 +714,7 @@ ${periodPending.length > 0
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => handleDownload(selectedArchivedReport.content)}
+                  onClick={() => handleDownload(selectedArchivedReport)}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                 >
                   <Download className="w-4 h-4" />

@@ -10,7 +10,9 @@ import {
   ArrowRight,
   Activity,
   Package,
-  ShoppingCart
+  ShoppingCart,
+  Store,
+  Target
 } from 'lucide-react';
 import { useAnomalyStore } from '../store/anomalyStore';
 import { useRuleStore } from '../store/ruleStore';
@@ -24,8 +26,10 @@ import Badge from '../components/common/Badge';
 
 export default function Dashboard() {
   const [isInspecting, setIsInspecting] = useState(false);
+  const [showShopSelector, setShowShopSelector] = useState(false);
+  const [selectedShopId, setSelectedShopId] = useState('');
   const { getPendingCount, getProcessingCount, getResolvedCount, anomalies, getTodayAnomalies } = useAnomalyStore();
-  const { rules } = useRuleStore();
+  const { rules, getRuleById } = useRuleStore();
   const { shops, inspectionHistory, startInspection, completeInspection } = useAppStore();
 
   const pendingCount = getPendingCount();
@@ -37,21 +41,36 @@ export default function Dashboard() {
   const resolutionRate = totalAnomalies > 0 ? Math.round((resolvedCount / totalAnomalies) * 100) : 0;
 
   const handleStartInspection = () => {
+    setShowShopSelector(true);
+  };
+
+  const handleConfirmInspection = () => {
     setIsInspecting(true);
+    setShowShopSelector(false);
+    
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayAnomalyList = anomalies.filter((a) => new Date(a.createdAt) >= today);
-    const inspectionId = startInspection(enabledRules, todayAnomalyList);
+    
+    let filteredAnomalies = anomalies.filter((a) => new Date(a.createdAt) >= today);
+    if (selectedShopId) {
+      filteredAnomalies = filteredAnomalies.filter(a => a.shopId === selectedShopId);
+    }
+    
+    const hitRuleIds = [...new Set(filteredAnomalies.map(a => a.ruleId))];
+    const inspectionId = startInspection(enabledRules, filteredAnomalies, hitRuleIds, selectedShopId);
     
     setTimeout(() => {
-      const criticalCount = todayAnomalyList.filter((a) => a.level === 'critical').length;
-      const warningCount = todayAnomalyList.filter((a) => a.level === 'warning').length;
-      const infoCount = todayAnomalyList.filter((a) => a.level === 'info').length;
+      const criticalCount = filteredAnomalies.filter((a) => a.level === 'critical').length;
+      const warningCount = filteredAnomalies.filter((a) => a.level === 'warning').length;
+      const infoCount = filteredAnomalies.filter((a) => a.level === 'info').length;
       
-      completeInspection(inspectionId, todayAnomalyList.length, criticalCount, warningCount, infoCount);
+      completeInspection(inspectionId, filteredAnomalies.length, criticalCount, warningCount, infoCount);
       setIsInspecting(false);
+      setSelectedShopId('');
     }, 2000);
   };
+
+  const activeShops = shops.filter(s => s.status === 'active');
 
   return (
     <div className="space-y-6">
@@ -250,7 +269,7 @@ export default function Dashboard() {
                   </div>
                   <span className="text-sm text-slate-600">监控店铺</span>
                 </div>
-                <span className="font-semibold text-slate-900">{shops.filter(s => s.status === 'active').length}</span>
+                <span className="font-semibold text-slate-900">{activeShops.length}</span>
               </div>
             </div>
           </div>
@@ -258,38 +277,44 @@ export default function Dashboard() {
           <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-6 text-white">
             <h3 className="font-semibold mb-4">最近巡检记录</h3>
             <div className="space-y-2">
-              {inspectionHistory.slice(0, 5).map((record) => (
-                <Link
-                  key={record.id}
-                  to={`/inspections/${record.id}`}
-                  className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-white/10 transition-colors group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${
-                      record.status === 'running' ? 'bg-blue-400 animate-pulse' : 
-                      record.anomaliesFound > 0 ? 'bg-orange-400' : 'bg-green-400'
-                    }`}></div>
-                    <span className="text-slate-300">
-                      {format(new Date(record.startTime), 'MM-dd HH:mm')}
-                    </span>
-                    <span className="text-slate-500 text-xs group-hover:text-slate-300">
-                      {record.operatorName}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {record.status === 'running' ? (
-                      <span className="text-blue-400 flex items-center gap-1">
-                        进行中
-                      </span>
-                    ) : (
-                      <span className={record.anomaliesFound > 0 ? 'text-orange-400' : 'text-green-400'}>
-                        {record.anomaliesFound}个异常
-                      </span>
-                    )}
-                    <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
-                  </div>
-                </Link>
-              ))}
+              {inspectionHistory.slice(0, 5).map((record) => {
+                const shopInfo = record.shopName ? `${record.shopName}` : '全部店铺';
+                const hitRulesList = record.hitRuleIds.map(id => getRuleById(id)).filter(Boolean);
+                return (
+                  <Link
+                    key={record.id}
+                    to={`/inspections/${record.id}`}
+                    className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-white/10 transition-colors group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-2 h-2 rounded-full ${
+                        record.status === 'running' ? 'bg-blue-400 animate-pulse' : 
+                        record.anomaliesFound > 0 ? 'bg-orange-400' : 'bg-green-400'
+                      }`}></div>
+                      <div>
+                        <span className="text-slate-300">
+                          {format(new Date(record.startTime), 'MM-dd HH:mm')}
+                        </span>
+                        <span className="text-slate-500 text-xs ml-2 block">
+                          {shopInfo}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {record.status === 'running' ? (
+                        <span className="text-blue-400 flex items-center gap-1">
+                          进行中
+                        </span>
+                      ) : (
+                        <span className={record.anomaliesFound > 0 ? 'text-orange-400' : 'text-green-400'}>
+                          {record.anomaliesFound}个异常
+                        </span>
+                      )}
+                      <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
+                    </div>
+                  </Link>
+                );
+              })}
               {inspectionHistory.length === 0 && (
                 <p className="text-slate-400 text-sm text-center py-4">暂无巡检记录</p>
               )}
@@ -304,6 +329,69 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {showShopSelector && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="p-6 border-b border-slate-200">
+              <h2 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+                <Store className="w-5 h-5 text-blue-600" />
+                选择巡检范围
+              </h2>
+              <p className="text-sm text-slate-500 mt-1">选择要巡检的店铺范围</p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">巡检店铺</label>
+                <select
+                  value={selectedShopId}
+                  onChange={(e) => setSelectedShopId(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">全部店铺</option>
+                  {activeShops.map((shop) => (
+                    <option key={shop.id} value={shop.id}>{shop.name}</option>
+                  ))}
+                </select>
+                {selectedShopId && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    将只巡检: {activeShops.find(s => s.id === selectedShopId)?.name}
+                  </p>
+                )}
+              </div>
+              <div className="p-4 bg-slate-50 rounded-lg">
+                <div className="flex items-center gap-2 mb-2">
+                  <Target className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm font-medium text-slate-700">巡检说明</span>
+                </div>
+                <ul className="text-xs text-slate-500 space-y-1">
+                  <li>• 将检查选中的店铺范围内的所有异常</li>
+                  <li>• 生成报告将记录本次巡检的店铺范围</li>
+                  <li>• 历史记录可追溯本次巡检覆盖的店铺</li>
+                </ul>
+              </div>
+            </div>
+            <div className="p-6 border-t border-slate-200 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowShopSelector(false);
+                  setSelectedShopId('');
+                }}
+                className="px-5 py-2.5 border border-slate-200 rounded-lg font-medium text-slate-700 hover:bg-slate-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleConfirmInspection}
+                className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center gap-2"
+              >
+                <Play className="w-4 h-4" />
+                开始巡检
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
