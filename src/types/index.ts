@@ -128,6 +128,24 @@ export interface DailyReport {
   createdAt: Date;
 }
 
+export interface AnomalySnapshot {
+  id: string;
+  ruleId: string;
+  type: RuleType;
+  level: AlertLevel;
+  status: AnomalyStatus;
+  title: string;
+  description: string;
+  shopId: string;
+  threshold: number;
+  actualValue: number;
+  deviation: number;
+  assignee: string;
+  assigneeName: string;
+  resolution: string;
+  createdAt: Date;
+}
+
 export interface InspectionHistory {
   id: string;
   startTime: Date;
@@ -141,9 +159,29 @@ export interface InspectionHistory {
   summary: string;
   operatorId: string;
   operatorName: string;
-  anomalyIds: string[];
+  anomalySnapshots: AnomalySnapshot[];
   hitRuleIds: string[];
   shopId?: string;
+  shopName?: string;
+}
+
+export interface ArchivedReport {
+  id: string;
+  type: 'daily' | 'weekly' | 'monthly';
+  date: Date;
+  shopId: string;
+  shopName: string;
+  content: string;
+  statistics: {
+    totalAnomalies: number;
+    pending: number;
+    processing: number;
+    resolved: number;
+    ignored: number;
+  };
+  createdAt: Date;
+  createdBy: string;
+  createdByName: string;
 }
 
 export interface ReportSubscription {

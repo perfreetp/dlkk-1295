@@ -38,12 +38,12 @@ export default function Dashboard() {
 
   const handleStartInspection = () => {
     setIsInspecting(true);
-    const inspectionId = startInspection(enabledRules);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayAnomalyList = anomalies.filter((a) => new Date(a.createdAt) >= today);
+    const inspectionId = startInspection(enabledRules, todayAnomalyList);
     
     setTimeout(() => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayAnomalyList = anomalies.filter((a) => new Date(a.createdAt) >= today);
       const criticalCount = todayAnomalyList.filter((a) => a.level === 'critical').length;
       const warningCount = todayAnomalyList.filter((a) => a.level === 'warning').length;
       const infoCount = todayAnomalyList.filter((a) => a.level === 'info').length;

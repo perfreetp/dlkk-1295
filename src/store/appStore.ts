@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { User, Notification, Shop, InspectionHistory, ReportSubscription } from '../types';
+import { User, Notification, Shop, InspectionHistory, ReportSubscription, ArchivedReport, AnomalySnapshot, Anomaly } from '../types';
 import { shops as initialShops, users as initialUsers, notifications as initialNotifications } from '../data/mockData';
 
 const defaultSubscription: ReportSubscription = {
@@ -8,6 +8,8 @@ const defaultSubscription: ReportSubscription = {
   weekly: { enabled: false, methods: ['站内信'], userIds: [], lastSentAt: null },
   monthly: { enabled: false, methods: ['站内信'], userIds: [], lastSentAt: null },
 };
+
+const SNAPSHOT_UPDATE_EVENT = 'snapshot-updated';
 
 interface AppState {
   currentUser: User | null;
@@ -18,6 +20,7 @@ interface AppState {
   selectedShopId: string;
   selectedDateRange: { start: Date; end: Date };
   inspectionHistory: InspectionHistory[];
+  archivedReports: ArchivedReport[];
   subscription: ReportSubscription;
   setCurrentUser: (user: User | null) => void;
   addNotification: (notification: Omit<Notification, 'id' | 'createdAt'>) => void;
@@ -25,12 +28,15 @@ interface AppState {
   markAllNotificationsAsRead: () => void;
   setSelectedShopId: (shopId: string) => void;
   setSelectedDateRange: (range: { start: Date; end: Date }) => void;
-  startInspection: (totalRules: number, anomalyIds?: string[], hitRuleIds?: string[], shopId?: string) => string;
+  startInspection: (totalRules: number, anomalies?: Anomaly[], hitRuleIds?: string[], shopId?: string) => string;
   completeInspection: (id: string, anomaliesFound: number, criticalCount: number, warningCount: number, infoCount: number) => void;
   getLatestInspection: () => InspectionHistory | null;
   getInspectionById: (id: string) => InspectionHistory | undefined;
+  updateSnapshot: (anomalyId: string, updates: Partial<Pick<AnomalySnapshot, 'status' | 'assignee' | 'assigneeName' | 'resolution'>>) => void;
   updateSubscription: (subscription: Partial<ReportSubscription>) => void;
   getSubscription: () => ReportSubscription;
+  archiveReport: (report: Omit<ArchivedReport, 'id' | 'createdAt'>) => void;
+  getArchivedReports: (filters?: { type?: string; shopId?: string }) => ArchivedReport[];
 }
 
 export const useAppStore = create<AppState>()(
@@ -40,13 +46,14 @@ export const useAppStore = create<AppState>()(
       users: initialUsers,
       shops: initialShops,
       notifications: initialNotifications,
-      unreadCount: initialNotifications.filter(n => !n.read).length,
+      unreadCount: initialNotifications.filter(n => n.read).length,
       selectedShopId: '',
       selectedDateRange: {
         start: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
         end: new Date(),
       },
       inspectionHistory: [],
+      archivedReports: [],
       subscription: defaultSubscription,
       setCurrentUser: (user) => set({ currentUser: user }),
       addNotification: (notification) => {
@@ -82,8 +89,28 @@ export const useAppStore = create<AppState>()(
       },
       setSelectedShopId: (shopId) => set({ selectedShopId: shopId }),
       setSelectedDateRange: (range) => set({ selectedDateRange: range }),
-      startInspection: (totalRules, anomalyIds = [], hitRuleIds = [], shopId) => {
+      startInspection: (totalRules, anomalies = [], hitRuleIds = [], shopId) => {
         const user = get().currentUser;
+        const shop = shopId ? get().shops.find(s => s.id === shopId) : null;
+        
+        const snapshots: AnomalySnapshot[] = anomalies.map(a => ({
+          id: a.id,
+          ruleId: a.ruleId,
+          type: a.type,
+          level: a.level,
+          status: a.status,
+          title: a.title,
+          description: a.description,
+          shopId: a.shopId,
+          threshold: a.threshold,
+          actualValue: a.actualValue,
+          deviation: a.deviation,
+          assignee: a.assignee,
+          assigneeName: a.assigneeName,
+          resolution: a.resolution,
+          createdAt: a.createdAt,
+        }));
+
         const newInspection: InspectionHistory = {
           id: `insp-${Date.now()}`,
           startTime: new Date(),
@@ -97,9 +124,10 @@ export const useAppStore = create<AppState>()(
           summary: '',
           operatorId: user?.id || 'system',
           operatorName: user?.name || '系统',
-          anomalyIds,
+          anomalySnapshots: snapshots,
           hitRuleIds,
           shopId,
+          shopName: shop?.name,
         };
         set((state) => ({
           inspectionHistory: [newInspection, ...state.inspectionHistory],
@@ -142,12 +170,42 @@ export const useAppStore = create<AppState>()(
       getInspectionById: (id) => {
         return get().inspectionHistory.find((h) => h.id === id);
       },
+      updateSnapshot: (anomalyId, updates) => {
+        set((state) => ({
+          inspectionHistory: state.inspectionHistory.map((inspection) => ({
+            ...inspection,
+            anomalySnapshots: inspection.anomalySnapshots.map((snapshot) =>
+              snapshot.id === anomalyId ? { ...snapshot, ...updates } : snapshot
+            ),
+          })),
+        }));
+      },
       updateSubscription: (subscription) => {
         set((state) => ({
           subscription: { ...state.subscription, ...subscription },
         }));
       },
       getSubscription: () => get().subscription,
+      archiveReport: (report) => {
+        const newReport: ArchivedReport = {
+          ...report,
+          id: `report-${Date.now()}`,
+          createdAt: new Date(),
+        };
+        set((state) => ({
+          archivedReports: [newReport, ...state.archivedReports],
+        }));
+      },
+      getArchivedReports: (filters) => {
+        let reports = get().archivedReports;
+        if (filters?.type) {
+          reports = reports.filter(r => r.type === filters.type);
+        }
+        if (filters?.shopId) {
+          reports = reports.filter(r => r.shopId === filters.shopId);
+        }
+        return reports;
+      },
     }),
     {
       name: 'app-storage',
@@ -156,8 +214,14 @@ export const useAppStore = create<AppState>()(
         selectedShopId: state.selectedShopId,
         selectedDateRange: state.selectedDateRange,
         inspectionHistory: state.inspectionHistory,
+        archivedReports: state.archivedReports,
         subscription: state.subscription,
       }),
     }
   )
 );
+
+window.addEventListener(SNAPSHOT_UPDATE_EVENT, ((event: CustomEvent) => {
+  const { anomalyId, updates } = event.detail;
+  useAppStore.getState().updateSnapshot(anomalyId, updates);
+}) as EventListener);

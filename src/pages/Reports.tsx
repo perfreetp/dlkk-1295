@@ -10,13 +10,16 @@ import {
   Bell,
   Settings,
   X,
-  Target
+  Target,
+  Search,
+  Archive,
+  Eye
 } from 'lucide-react';
 import { useAnomalyStore } from '../store/anomalyStore';
 import { useAppStore } from '../store/appStore';
 import { useRuleStore } from '../store/ruleStore';
 import { RULE_TYPE_OPTIONS } from '../store/ruleStore';
-import { ReportSubscription } from '../types';
+import { ReportSubscription, ArchivedReport } from '../types';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 
@@ -24,13 +27,16 @@ type ReportType = 'daily' | 'weekly' | 'monthly';
 
 export default function Reports() {
   const { anomalies } = useAnomalyStore();
-  const { shops, users, currentUser, subscription: savedSubscription, updateSubscription, getSubscription } = useAppStore();
+  const { shops, users, currentUser, subscription: savedSubscription, updateSubscription, getSubscription, archiveReport, getArchivedReports, archivedReports } = useAppStore();
   const { rules } = useRuleStore();
   const [reportType, setReportType] = useState<ReportType>('daily');
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedShopId, setSelectedShopId] = useState('');
   const [generatedReport, setGeneratedReport] = useState<string | null>(null);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<'create' | 'archive'>('create');
+  const [archiveFilters, setArchiveFilters] = useState({ type: '', shopId: '', search: '' });
+  const [selectedArchivedReport, setSelectedArchivedReport] = useState<ArchivedReport | null>(null);
 
   const [subscription, setSubscription] = useState<ReportSubscription>(getSubscription);
 
@@ -139,6 +145,29 @@ ${periodPending.length > 0
     setGeneratedReport(reportContent);
   };
 
+  const handleArchiveReport = () => {
+    if (!generatedReport) return;
+    
+    archiveReport({
+      type: reportType,
+      date: selectedDate,
+      shopId: selectedShopId,
+      shopName: shop?.name || '全部店铺',
+      content: generatedReport,
+      statistics: {
+        totalAnomalies: periodAnomalies.length,
+        pending: periodPending.length,
+        processing: periodProcessing.length,
+        resolved: periodResolved.length,
+        ignored: periodIgnored.length,
+      },
+      createdBy: currentUser?.id || 'system',
+      createdByName: currentUser?.name || '系统',
+    });
+    
+    alert('报告已归档');
+  };
+
   const handleCopy = () => {
     if (generatedReport) {
       navigator.clipboard.writeText(generatedReport);
@@ -146,9 +175,10 @@ ${periodPending.length > 0
     }
   };
 
-  const handleDownload = () => {
-    if (generatedReport) {
-      const blob = new Blob([generatedReport], { type: 'text/plain;charset=utf-8' });
+  const handleDownload = (content?: string) => {
+    const reportContent = content || generatedReport;
+    if (reportContent) {
+      const blob = new Blob([reportContent], { type: 'text/plain;charset=utf-8' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
       const periodLabel = reportType === 'daily' ? '日报' : reportType === 'weekly' ? '周报' : '月报';
@@ -163,202 +193,389 @@ ${periodPending.length > 0
     setShowSubscriptionModal(false);
   };
 
+  const filteredArchivedReports = archivedReports.filter(r => {
+    if (archiveFilters.type && r.type !== archiveFilters.type) return false;
+    if (archiveFilters.shopId && r.shopId !== archiveFilters.shopId) return false;
+    if (archiveFilters.search && !r.content.toLowerCase().includes(archiveFilters.search.toLowerCase())) return false;
+    return true;
+  });
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-slate-700 bg-clip-text text-transparent">
-          报告生成
+          报告中心
         </h1>
-        <p className="text-slate-500 mt-1">生成数据巡检日报、周报和月报</p>
+        <p className="text-slate-500 mt-1">生成和管理数据巡检报告</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-            <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
-              <FileText className="w-5 h-5 text-blue-600" />
-              报告设置
-            </h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">报告类型</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['daily', 'weekly', 'monthly'] as const).map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => {
-                        setReportType(type);
-                        setGeneratedReport(null);
-                      }}
-                      className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                        reportType === type
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                      }`}
-                    >
-                      {type === 'daily' ? '日报' : type === 'weekly' ? '周报' : '月报'}
-                    </button>
-                  ))}
+      <div className="flex gap-4 border-b border-slate-200">
+        <button
+          onClick={() => setActiveTab('create')}
+          className={`pb-3 px-2 font-medium transition-colors ${
+            activeTab === 'create'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            <FileText className="w-4 h-4" />
+            生成报告
+          </span>
+        </button>
+        <button
+          onClick={() => setActiveTab('archive')}
+          className={`pb-3 px-2 font-medium transition-colors ${
+            activeTab === 'archive'
+              ? 'text-blue-600 border-b-2 border-blue-600'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <span className="flex items-center gap-2">
+            <Archive className="w-4 h-4" />
+            历史报告库 ({archivedReports.length})
+          </span>
+        </button>
+      </div>
+
+      {activeTab === 'create' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1 space-y-6">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+              <h3 className="font-semibold text-slate-900 mb-4 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-blue-600" />
+                报告设置
+              </h3>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">报告类型</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['daily', 'weekly', 'monthly'] as const).map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => {
+                          setReportType(type);
+                          setGeneratedReport(null);
+                        }}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          reportType === type
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        {type === 'daily' ? '日报' : type === 'weekly' ? '周报' : '月报'}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">巡检店铺</label>
-                <select
-                  value={selectedShopId}
-                  onChange={(e) => {
-                    setSelectedShopId(e.target.value);
-                    setGeneratedReport(null);
-                  }}
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">全部店铺</option>
-                  {shops.filter(s => s.status === 'active').map((shop) => (
-                    <option key={shop.id} value={shop.id}>{shop.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">报告日期</label>
-                <div className="relative">
-                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                  <input
-                    type="date"
-                    value={format(selectedDate, 'yyyy-MM-dd')}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">巡检店铺</label>
+                  <select
+                    value={selectedShopId}
                     onChange={(e) => {
-                      setSelectedDate(new Date(e.target.value));
+                      setSelectedShopId(e.target.value);
                       setGeneratedReport(null);
                     }}
-                    className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">全部店铺</option>
+                    {shops.filter(s => s.status === 'active').map((shop) => (
+                      <option key={shop.id} value={shop.id}>{shop.name}</option>
+                    ))}
+                  </select>
                 </div>
-              </div>
 
-              <button
-                onClick={generateReport}
-                className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-medium hover:shadow-lg hover:shadow-blue-500/25 transition-all"
-              >
-                <FileText className="w-5 h-5" />
-                生成报告
-              </button>
-            </div>
-          </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">报告日期</label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input
+                      type="date"
+                      value={format(selectedDate, 'yyyy-MM-dd')}
+                      onChange={(e) => {
+                        setSelectedDate(new Date(e.target.value));
+                        setGeneratedReport(null);
+                      }}
+                      className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-            <h3 className="font-semibold text-slate-900 mb-4">
-              {reportType === 'daily' ? '今日' : reportType === 'weekly' ? '本周' : '本月'}统计
-              {shop && <span className="text-sm font-normal text-slate-500 ml-2">({shop.name})</span>}
-            </h3>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5 text-red-600" />
-                  <span className="text-sm text-slate-700">发现异常</span>
-                </div>
-                <span className="font-semibold text-red-600">{periodAnomalies.length}</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-5 h-5 text-orange-600" />
-                  <span className="text-sm text-slate-700">待处理</span>
-                </div>
-                <span className="font-semibold text-orange-600">{periodPending.length}</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="w-5 h-5 text-green-600" />
-                  <span className="text-sm text-slate-700">已解决</span>
-                </div>
-                <span className="font-semibold text-green-600">{periodResolved.length}</span>
+                <button
+                  onClick={generateReport}
+                  className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-medium hover:shadow-lg hover:shadow-blue-500/25 transition-all"
+                >
+                  <FileText className="w-5 h-5" />
+                  生成报告
+                </button>
               </div>
             </div>
-          </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                <Bell className="w-5 h-5 text-purple-600" />
-                消息订阅
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+              <h3 className="font-semibold text-slate-900 mb-4">
+                {reportType === 'daily' ? '今日' : reportType === 'weekly' ? '本周' : '本月'}统计
+                {shop && <span className="text-sm font-normal text-slate-500 ml-2">({shop.name})</span>}
               </h3>
-              <button
-                onClick={() => setShowSubscriptionModal(true)}
-                className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <Settings className="w-4 h-4 text-slate-500" />
-              </button>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-red-600" />
+                    <span className="text-sm text-slate-700">发现异常</span>
+                  </div>
+                  <span className="font-semibold text-red-600">{periodAnomalies.length}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-orange-600" />
+                    <span className="text-sm text-slate-700">待处理</span>
+                  </div>
+                  <span className="font-semibold text-orange-600">{periodPending.length}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 text-green-600" />
+                    <span className="text-sm text-slate-700">已解决</span>
+                  </div>
+                  <span className="font-semibold text-green-600">{periodResolved.length}</span>
+                </div>
+              </div>
             </div>
-            <div className="space-y-3">
-              {(['daily', 'weekly', 'monthly'] as const).map((type) => {
-                const sub = subscription[type];
-                const label = type === 'daily' ? '日报' : type === 'weekly' ? '周报' : '月报';
-                const recipients = users.filter(u => sub.userIds.includes(u.id)).map(u => u.name);
-                return (
-                  <div key={type} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${sub.enabled ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-                      <span className="text-sm text-slate-700">{label}</span>
-                    </div>
-                    <div className="text-right">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${sub.enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                        {sub.enabled ? '已开启' : '未开启'}
-                      </span>
-                      {sub.enabled && sub.lastSentAt && (
-                        <p className="text-xs text-slate-400 mt-1">
-                          最近: {format(new Date(sub.lastSentAt), 'MM-dd HH:mm', { locale: zhCN })}
-                        </p>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                  <Bell className="w-5 h-5 text-purple-600" />
+                  消息订阅
+                </h3>
+                <button
+                  onClick={() => setShowSubscriptionModal(true)}
+                  className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <Settings className="w-4 h-4 text-slate-500" />
+                </button>
+              </div>
+              <div className="space-y-2">
+                {(['daily', 'weekly', 'monthly'] as const).map((type) => {
+                  const sub = subscription[type];
+                  const label = type === 'daily' ? '日报' : type === 'weekly' ? '周报' : '月报';
+                  const recipients = users.filter(u => sub.userIds.includes(u.id)).map(u => u.name);
+                  return (
+                    <div key={type} className="p-3 bg-slate-50 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${sub.enabled ? 'bg-green-500' : 'bg-slate-300'}`}></div>
+                          <span className="text-sm font-medium text-slate-700">{label}</span>
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${sub.enabled ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                          {sub.enabled ? '已开启' : '未开启'}
+                        </span>
+                      </div>
+                      {sub.enabled && (
+                        <>
+                          <div className="text-xs text-slate-500 mb-1">
+                            <span className="text-slate-400">方式:</span> {sub.methods.join(', ')}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            <span className="text-slate-400">发给:</span> {recipients.length > 0 ? recipients.join(', ') : '未设置'}
+                          </div>
+                          {sub.lastSentAt && (
+                            <div className="text-xs text-slate-400 mt-1">
+                              最近: {format(new Date(sub.lastSentAt), 'MM-dd HH:mm', { locale: zhCN })}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="lg:col-span-2">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="p-6 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-blue-600" />
-                报告预览
-              </h3>
-              {generatedReport && (
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleCopy}
-                    className="flex items-center gap-2 px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                  >
-                    <Copy className="w-4 h-4" />
-                    复制
-                  </button>
-                  <button
-                    onClick={handleDownload}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    <Download className="w-4 h-4" />
-                    下载
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="p-6">
-              {generatedReport ? (
-                <pre className="whitespace-pre-wrap font-mono text-sm text-slate-700 bg-slate-50 rounded-lg p-4 max-h-[600px] overflow-y-auto">
-                  {generatedReport}
-                </pre>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-                  <FileText className="w-16 h-16 mb-4 opacity-50" />
-                  <p className="text-lg font-medium mb-2">暂无报告</p>
-                  <p className="text-sm">请设置报告参数并点击"生成报告"</p>
-                </div>
-              )}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-blue-600" />
+                  报告预览
+                </h3>
+                {generatedReport && (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleCopy}
+                      className="flex items-center gap-2 px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                    >
+                      <Copy className="w-4 h-4" />
+                      复制
+                    </button>
+                    <button
+                      onClick={handleArchiveReport}
+                      className="flex items-center gap-2 px-4 py-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                    >
+                      <Archive className="w-4 h-4" />
+                      归档
+                    </button>
+                    <button
+                      onClick={() => handleDownload()}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      <Download className="w-4 h-4" />
+                      下载
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="p-6">
+                {generatedReport ? (
+                  <pre className="whitespace-pre-wrap font-mono text-sm text-slate-700 bg-slate-50 rounded-lg p-4 max-h-[600px] overflow-y-auto">
+                    {generatedReport}
+                  </pre>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                    <FileText className="w-16 h-16 mb-4 opacity-50" />
+                    <p className="text-lg font-medium mb-2">暂无报告</p>
+                    <p className="text-sm">请设置报告参数并点击"生成报告"</p>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200">
+          <div className="p-6 border-b border-slate-200">
+            <div className="flex items-center gap-4">
+              <div className="relative flex-1 max-w-xs">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="搜索报告内容..."
+                  value={archiveFilters.search}
+                  onChange={(e) => setArchiveFilters({ ...archiveFilters, search: e.target.value })}
+                  className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <select
+                value={archiveFilters.type}
+                onChange={(e) => setArchiveFilters({ ...archiveFilters, type: e.target.value })}
+                className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">全部类型</option>
+                <option value="daily">日报</option>
+                <option value="weekly">周报</option>
+                <option value="monthly">月报</option>
+              </select>
+              <select
+                value={archiveFilters.shopId}
+                onChange={(e) => setArchiveFilters({ ...archiveFilters, shopId: e.target.value })}
+                className="px-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">全部店铺</option>
+                {shops.map((shop) => (
+                  <option key={shop.id} value={shop.id}>{shop.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          
+          <div className="divide-y divide-slate-100">
+            {filteredArchivedReports.length > 0 ? (
+              filteredArchivedReports.map((report) => (
+                <div key={report.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center gap-4">
+                    <div className={`p-3 rounded-xl ${
+                      report.type === 'daily' ? 'bg-blue-100 text-blue-600' :
+                      report.type === 'weekly' ? 'bg-purple-100 text-purple-600' :
+                      'bg-orange-100 text-orange-600'
+                    }`}>
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-slate-900">
+                          {report.type === 'daily' ? '日报' : report.type === 'weekly' ? '周报' : '月报'}
+                        </span>
+                        <span className="text-sm text-slate-500">
+                          {format(new Date(report.date), 'yyyy-MM-dd', { locale: zhCN })}
+                        </span>
+                        <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+                          {report.shopName}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
+                        <span>异常: {report.statistics.totalAnomalies}</span>
+                        <span>已解决: {report.statistics.resolved}</span>
+                        <span>生成人: {report.createdByName}</span>
+                        <span>{format(new Date(report.createdAt), 'MM-dd HH:mm', { locale: zhCN })}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setSelectedArchivedReport(report)}
+                      className="flex items-center gap-1 px-3 py-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    >
+                      <Eye className="w-4 h-4" />
+                      查看
+                    </button>
+                    <button
+                      onClick={() => handleDownload(report.content)}
+                      className="flex items-center gap-1 px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                    >
+                      <Download className="w-4 h-4" />
+                      下载
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="p-12 text-center text-slate-400">
+                <Archive className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>暂无归档报告</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {selectedArchivedReport && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">
+                  {selectedArchivedReport.type === 'daily' ? '日报' : selectedArchivedReport.type === 'weekly' ? '周报' : '月报'}
+                </h2>
+                <p className="text-sm text-slate-500">
+                  {format(new Date(selectedArchivedReport.date), 'yyyy-MM-dd', { locale: zhCN })} | {selectedArchivedReport.shopName}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDownload(selectedArchivedReport.content)}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  <Download className="w-4 h-4" />
+                  下载
+                </button>
+                <button
+                  onClick={() => setSelectedArchivedReport(null)}
+                  className="p-2 hover:bg-slate-100 rounded-lg"
+                >
+                  <X className="w-5 h-5 text-slate-500" />
+                </button>
+              </div>
+            </div>
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+              <pre className="whitespace-pre-wrap font-mono text-sm text-slate-700 bg-slate-50 rounded-lg p-4">
+                {selectedArchivedReport.content}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSubscriptionModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

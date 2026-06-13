@@ -3,6 +3,19 @@ import { persist } from 'zustand/middleware';
 import { Anomaly, ProcessingRecord, AlertLevel, AnomalyStatus, RuleType } from '../types';
 import { anomalies as initialAnomalies, processingRecords as initialRecords } from '../data/mockData';
 
+const SNAPSHOT_UPDATE_EVENT = 'snapshot-updated';
+
+export const emitSnapshotUpdate = (anomalyId: string, updates: {
+  status?: AnomalyStatus;
+  assignee?: string;
+  assigneeName?: string;
+  resolution?: string;
+}) => {
+  window.dispatchEvent(new CustomEvent(SNAPSHOT_UPDATE_EVENT, {
+    detail: { anomalyId, updates }
+  }));
+};
+
 interface AnomalyFilters {
   shopId: string;
   type: RuleType | '';
@@ -109,6 +122,11 @@ export const useAnomalyStore = create<AnomalyState>()(
           newValue: userName,
           comment: `分配给${userName}处理`,
         });
+        emitSnapshotUpdate(id, {
+          status: 'processing',
+          assignee: userId,
+          assigneeName: userName,
+        });
       },
       resolveAnomaly: (id, resolution) => {
         const now = new Date();
@@ -130,6 +148,10 @@ export const useAnomalyStore = create<AnomalyState>()(
             newValue: 'resolved',
             comment: resolution,
           });
+          emitSnapshotUpdate(id, {
+            status: 'resolved',
+            resolution,
+          });
         }
       },
       ignoreAnomaly: (id, reason) => {
@@ -143,6 +165,10 @@ export const useAnomalyStore = create<AnomalyState>()(
             previousValue: anomaly.status,
             newValue: 'ignored',
             comment: reason,
+          });
+          emitSnapshotUpdate(id, {
+            status: 'ignored',
+            resolution: reason,
           });
         }
         set((state) => ({
