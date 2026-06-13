@@ -133,6 +133,18 @@ export const useAnomalyStore = create<AnomalyState>()(
         }
       },
       ignoreAnomaly: (id, reason) => {
+        const anomaly = get().getAnomalyById(id);
+        if (anomaly) {
+          get().addProcessingRecord({
+            anomalyId: id,
+            operator: anomaly.assignee || 'system',
+            operatorName: anomaly.assigneeName || '系统',
+            action: 'ignored',
+            previousValue: anomaly.status,
+            newValue: 'ignored',
+            comment: reason,
+          });
+        }
         set((state) => ({
           anomalies: state.anomalies.map((a) =>
             a.id === id

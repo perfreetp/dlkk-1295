@@ -18,7 +18,7 @@ import { zhCN } from 'date-fns/locale';
 
 export default function Records() {
   const { processingRecords, anomalies } = useAnomalyStore();
-  const { users } = useAppStore();
+  const { users, inspectionHistory } = useAppStore();
   const [searchKeyword, setSearchKeyword] = useState('');
   const [selectedOperator, setSelectedOperator] = useState('');
 
@@ -254,34 +254,35 @@ export default function Records() {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
             <h3 className="font-semibold text-slate-900 mb-4">历史巡检记录</h3>
             <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-sm text-slate-700">06-14 巡检</span>
+              {inspectionHistory.slice(0, 10).map((record) => (
+                <div key={record.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${
+                      record.status === 'running' ? 'bg-blue-500 animate-pulse' : 
+                      record.anomaliesFound > 0 ? 'bg-orange-500' : 'bg-green-500'
+                    }`}></div>
+                    <div>
+                      <span className="text-sm text-slate-700">
+                        {format(new Date(record.startTime), 'MM-dd HH:mm', { locale: zhCN })}
+                      </span>
+                      <span className="text-xs text-slate-400 ml-2">
+                        {record.operatorName}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className={`text-sm ${
+                      record.status === 'running' ? 'text-blue-600' :
+                      record.anomaliesFound > 0 ? 'text-orange-600' : 'text-green-600'
+                    }`}>
+                      {record.status === 'running' ? '进行中' : `${record.anomaliesFound}个异常`}
+                    </span>
+                  </div>
                 </div>
-                <span className="text-sm text-slate-500">08:00</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-sm text-slate-700">06-13 巡检</span>
-                </div>
-                <span className="text-sm text-slate-500">08:00</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-sm text-slate-700">06-12 巡检</span>
-                </div>
-                <span className="text-sm text-slate-500">08:00</span>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-sm text-slate-700">06-11 巡检</span>
-                </div>
-                <span className="text-sm text-slate-500">08:00</span>
-              </div>
+              ))}
+              {inspectionHistory.length === 0 && (
+                <p className="text-sm text-slate-400 text-center py-4">暂无巡检记录</p>
+              )}
             </div>
           </div>
         </div>

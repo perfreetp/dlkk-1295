@@ -26,7 +26,7 @@ export default function Dashboard() {
   const [isInspecting, setIsInspecting] = useState(false);
   const { getPendingCount, getProcessingCount, getResolvedCount, anomalies, getTodayAnomalies } = useAnomalyStore();
   const { rules } = useRuleStore();
-  const { shops } = useAppStore();
+  const { shops, inspectionHistory, startInspection, completeInspection } = useAppStore();
 
   const pendingCount = getPendingCount();
   const processingCount = getProcessingCount();
@@ -38,7 +38,17 @@ export default function Dashboard() {
 
   const handleStartInspection = () => {
     setIsInspecting(true);
+    const inspectionId = startInspection(enabledRules);
+    
     setTimeout(() => {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayAnomalyList = anomalies.filter((a) => new Date(a.createdAt) >= today);
+      const criticalCount = todayAnomalyList.filter((a) => a.level === 'critical').length;
+      const warningCount = todayAnomalyList.filter((a) => a.level === 'warning').length;
+      const infoCount = todayAnomalyList.filter((a) => a.level === 'info').length;
+      
+      completeInspection(inspectionId, todayAnomalyList.length, criticalCount, warningCount, infoCount);
       setIsInspecting(false);
     }, 2000);
   };
@@ -248,22 +258,32 @@ export default function Dashboard() {
           <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-6 text-white">
             <h3 className="font-semibold mb-4">最近巡检记录</h3>
             <div className="space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-300">06-14 08:00</span>
-                <span className="text-green-400">完成 (3个异常)</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-300">06-13 08:00</span>
-                <span className="text-green-400">完成 (5个异常)</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-300">06-12 08:00</span>
-                <span className="text-green-400">完成 (4个异常)</span>
-              </div>
+              {inspectionHistory.slice(0, 5).map((record) => (
+                <div key={record.id} className="flex items-center justify-between text-sm">
+                  <span className="text-slate-300">
+                    {format(new Date(record.startTime), 'MM-dd HH:mm')}
+                  </span>
+                  {record.status === 'running' ? (
+                    <span className="text-blue-400 flex items-center gap-1">
+                      <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
+                      进行中
+                    </span>
+                  ) : (
+                    <span className={record.anomaliesFound > 0 ? 'text-orange-400' : 'text-green-400'}>
+                      完成 ({record.anomaliesFound}个异常)
+                    </span>
+                  )}
+                </div>
+              ))}
+              {inspectionHistory.length === 0 && (
+                <p className="text-slate-400 text-sm text-center py-2">暂无巡检记录</p>
+              )}
             </div>
             <div className="mt-4 pt-4 border-t border-slate-700">
               <p className="text-xs text-slate-400">
-                上次巡检时间: {format(new Date(), 'MM-dd HH:mm', { locale: zhCN })}
+                {inspectionHistory.length > 0 
+                  ? `上次巡检: ${format(new Date(inspectionHistory[0].startTime), 'MM-dd HH:mm', { locale: zhCN })}`
+                  : `当前时间: ${format(new Date(), 'MM-dd HH:mm', { locale: zhCN })}`}
               </p>
             </div>
           </div>

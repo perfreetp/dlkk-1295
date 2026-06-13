@@ -128,6 +128,21 @@ export interface DailyReport {
   createdAt: Date;
 }
 
+export interface InspectionHistory {
+  id: string;
+  startTime: Date;
+  endTime: Date | null;
+  status: 'running' | 'completed' | 'failed';
+  totalRules: number;
+  anomaliesFound: number;
+  criticalCount: number;
+  warningCount: number;
+  infoCount: number;
+  summary: string;
+  operatorId: string;
+  operatorName: string;
+}
+
 export const RULE_TYPE_LABELS: Record<RuleType, string> = {
   inventory_negative: '库存为负',
   price_drop: '价格突降',

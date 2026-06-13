@@ -7,14 +7,15 @@ import {
   ChevronDown,
   AlertTriangle,
   ArrowRight,
-  X
+  X,
+  Calendar
 } from 'lucide-react';
 import { useAnomalyStore } from '../store/anomalyStore';
 import { useAppStore } from '../store/appStore';
 import { RULE_TYPE_OPTIONS, ALERT_LEVEL_OPTIONS } from '../store/ruleStore';
 import { RuleType, AlertLevel, AnomalyStatus } from '../types';
 import Badge from '../components/common/Badge';
-import { format } from 'date-fns';
+import { format, startOfDay, endOfDay, subDays } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 
 export default function Anomalies() {
@@ -22,6 +23,8 @@ export default function Anomalies() {
   const { shops } = useAppStore();
   const [showFilters, setShowFilters] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [startDate, setStartDate] = useState<string>(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
+  const [endDate, setEndDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const pageSize = 10;
 
   const filteredAnomalies = getFilteredAnomalies();
@@ -30,6 +33,23 @@ export default function Anomalies() {
     (currentPage - 1) * pageSize,
     currentPage * pageSize
   );
+
+  const applyDateFilter = () => {
+    if (startDate && endDate) {
+      setFilters({
+        dateRange: {
+          start: startOfDay(new Date(startDate)),
+          end: endOfDay(new Date(endDate)),
+        },
+      });
+    }
+  };
+
+  const handleResetFilters = () => {
+    resetFilters();
+    setStartDate(format(subDays(new Date(), 30), 'yyyy-MM-dd'));
+    setEndDate(format(new Date(), 'yyyy-MM-dd'));
+  };
 
   const handleExport = () => {
     const data = filteredAnomalies.map((a) => ({
@@ -54,7 +74,7 @@ export default function Anomalies() {
     link.click();
   };
 
-  const hasActiveFilters = filters.shopId || filters.type || filters.level || filters.status || filters.searchKeyword;
+  const hasActiveFilters = filters.shopId || filters.type || filters.level || filters.status || filters.searchKeyword || filters.dateRange;
 
   return (
     <div className="space-y-6">
@@ -149,10 +169,45 @@ export default function Anomalies() {
               </select>
             </div>
           </div>
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-slate-400" />
+                <span className="text-sm text-slate-600">时间范围:</span>
+              </div>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+              <span className="text-slate-400">至</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+              <button
+                onClick={applyDateFilter}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+              >
+                应用
+              </button>
+              {filters.dateRange && (
+                <button
+                  onClick={() => setFilters({ dateRange: null })}
+                  className="px-4 py-2 text-slate-600 hover:text-slate-900 text-sm font-medium"
+                >
+                  清除日期
+                </button>
+              )}
+            </div>
+          </div>
           <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-slate-100">
             {hasActiveFilters && (
               <button
-                onClick={resetFilters}
+                onClick={handleResetFilters}
                 className="flex items-center gap-2 px-4 py-2 text-slate-600 hover:text-slate-900 font-medium"
               >
                 <X className="w-4 h-4" />
